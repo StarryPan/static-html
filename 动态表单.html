@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>动态表单</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.2.3/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    <style>
+        .hide {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container">
+        <main>
+            <div class="py-5 text-center">
+                <h2>Checkout form</h2>
+                <p class="lead">Below is an example form built entirely with Bootstrap’s form controls. Each required form group has a validation state that can be triggered by attempting to submit the form without completing it.</p>
+            </div>
+
+            <div class="row g-5">
+                <form id="sendItems" class="form-horizontal form" method="post" enctype="multipart/form-data">
+                    <div class="form-group mb-3 row">
+                        <label class="form-label col-3 col-form-label">用户ID</label>
+                        <div class="col-sm-8">
+                            <input type="email" class="form-control" placeholder="User ID">
+                            <small class="form-hint">请输入需要发送奖励的用户.</small>
+                        </div>
+                    </div>
+
+                    <div class="form-group mb-3 row">
+                        <label class="form-label col-3 col-form-label">发送道具</label>
+                        <div class="col-sm-4">
+                            <input type="text" list="itemListOptions" class="form-select" name="rewards[1][itemId]" placeholder="请选择道具"/>
+                        </div>
+                        <div class="col-sm-4">
+                            <input type="number" class="form-control" name="rewards[1][itemCount]" placeholder="道具数量"/>
+                        </div>
+                        <div class="col-sm-1">
+                            <button type="button" class="btn btn-success addButton">添加</button>
+                        </div>
+                        <datalist id="itemListOptions">
+                            <option value="10001:钻石"></option>
+                            <option value="10002:金币"></option>
+                            <option value="10003:信仰值"></option>
+                            <option value="10004:主线加速时间"></option>
+                            <option value="10005:能量骑士低"></option>
+                            <option value="10006:能量骑士中"></option>
+                            <option value="10007:击杀骑士低"></option>
+                            <option value="10008:击杀骑士中"></option>
+                            <option value="10009:伤害骑士低"></option>
+                            <option value="10010:伤害骑士中"></option>
+                            <option value="10011:恢复骑士低"></option>
+                            <option value="10012:恢复骑士中"></option>
+                        </datalist>
+                    </div>
+
+                    <div class="form-group hide mb-3 row" id="bookTemplate">
+                        <label class="form-label col-3 col-form-label"></label>
+                        <div class="col-sm-4">
+                            <input type="text" list="itemListOptions" class="form-select" name="rewards[1][itemId]" placeholder="请选择道具"/>
+                        </div>
+                        <div class="col-sm-4">
+                            <input type="number" class="form-control" name="rewards[1][itemCount]" placeholder="道具数量"/>
+                        </div>
+                        <div class="col-sm-1">
+                            <button type="button" class="btn btn-danger removeButton">减少</button>
+                        </div>
+                    </div>
+
+                    <div class="form-footer">
+                        <label class="form-label col-3 col-form-label"></label>
+                        <button type="submit" class="btn btn-primary">Submit</button>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.0/jquery.min.js"></script>
+    <script type="text/javascript">
+        $(document).ready(function () {
+            let index = 1;
+            $('#sendItems')
+                // 添加
+                .on('click', '.addButton', function () {
+                    if (this.name > 0 && index === 0) {
+                        index = this.name;
+                    }
+                    index++;
+                    let $template = $('#bookTemplate'),
+                        $clone = $template
+                            .clone()
+                            .removeClass('hide')
+                            .removeAttr('id')
+                            .attr('data-book-index', index)
+                            .insertBefore($template);
+
+                    // 更新名称下标
+                    $clone
+                        .find('[path="itemId"]').attr('name', 'rewards[' + index + '][itemId]').end()
+                        .find('[path="itemCount"]').attr('name', 'rewards[' + index + '][itemCount]').end();
+                })
+                // 减少
+                .on('click', '.removeButton', function () {
+                    let $row = $(this).parents('.form-group'),
+                        index = $row.attr('data-book-index');
+
+                    // 移除Item
+                    $row.remove();
+                });
+        });
+    </script>
+</body>
+</html>
