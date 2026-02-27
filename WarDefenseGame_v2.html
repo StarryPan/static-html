@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>战火防线 · 环形塔防 v2</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            touch-action: none;
+            user-select: none;
+        }
+
+        body {
+            background: #0a0510;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: linear-gradient(180deg, #1a0a1a 0%, #0a0510 100%);
+        }
+
+        .ui {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 30px;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .stat {
+            background: rgba(0,0,0,0.7);
+            padding: 10px 25px;
+            border-radius: 20px;
+            border: 2px solid rgba(255,100,0,0.5);
+            text-align: center;
+        }
+
+        .stat-label { font-size: 11px; color: #888; }
+        .stat-value { font-size: 22px; color: #ff6b00; font-weight: bold; text-shadow: 0 0 10px rgba(255,100,0,0.8); }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            z-index: 100;
+        }
+
+        .modal.active { display: flex; }
+
+        .upgrade-card {
+            width: 160px;
+            height: 210px;
+            background: linear-gradient(135deg, #1a1a2e, #0f0f1a);
+            border: 2px solid;
+            border-radius: 15px;
+            margin: 10px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            color: #fff;
+        }
+
+        .upgrade-card:hover { transform: translateY(-8px) scale(1.05); }
+        .upgrade-icon { font-size: 40px; margin-bottom: 12px; }
+        .upgrade-name { font-size: 16px; font-weight: bold; margin-bottom: 6px; }
+        .upgrade-desc { font-size: 12px; color: #aaa; }
+
+        .btn {
+            padding: 18px 55px;
+            font-size: 22px;
+            background: linear-gradient(135deg, #ff6b00, #ffaa00);
+            border: none;
+            border-radius: 35px;
+            color: #fff;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 0 30px rgba(255,100,0,0.5);
+            margin-top: 30px;
+            transition: transform 0.2s;
+        }
+
+        .btn:hover { transform: scale(1.05); }
+
+        .damage-text {
+            position: absolute;
+            color: #fff;
+            font-weight: bold;
+            font-size: 14px;
+            pointer-events: none;
+            animation: floatUp 0.6s ease-out forwards;
+            text-shadow: 0 0 5px #000;
+        }
+
+        @keyframes floatUp {
+            to { opacity: 0; transform: translateY(-40px); }
+        }
+    </style>
+    <base target="_blank">
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<div class="ui">
+    <div class="stat">
+        <div class="stat-label">SCORE</div>
+        <div class="stat-value" id="score">0</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">WAVE</div>
+        <div class="stat-value" id="wave">1</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">LEVEL</div>
+        <div class="stat-value" id="level">1</div>
+    </div>
+</div>
+
+<div class="modal" id="upgradeModal">
+    <h2 style="color: #ffaa00; margin-bottom: 25px; font-size: 32px;">LEVEL UP</h2>
+    <div style="display: flex; flex-wrap: wrap; justify-content: center;" id="upgradeList"></div>
+</div>
+
+<div class="modal active" id="startScreen">
+    <h1 style="color: #ff6b00; font-size: 48px; margin-bottom: 15px; text-shadow: 0 0 30px rgba(255,100,0,0.6);">ARC PRESS</h1>
+    <p style="color: #666; font-size: 14px;">SMOOTH · NATURAL · SURVIVE</p>
+    <button class="btn" onclick="startGame()">START</button>
+</div>
+
+<div class="modal" id="gameOverScreen">
+    <h2 style="color: #ff3333; font-size: 36px; margin-bottom: 15px;">CRUSHED</h2>
+    <p style="color: #fff; font-size: 28px; margin: 15px;">SCORE: <span id="finalScore" style="color: #ff6b00;">0</span></p>
+    <button class="btn" onclick="restartGame()">RETRY</button>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    // 配置
+    const CONFIG = {
+        arcRadius: 300,           // 弧形半径
+        arcWidth: 40,             // 弧形厚度
+        dropSpeed: 0.3,           // 统一下落速度（慢而稳）
+        pushSpeed: 0.1,           // 推挤速度（非常柔和）
+        spawnInterval: 10000,     // 10秒生成一面新墙
+        minGap: 80,               // 墙体间目标间距
+        colors: [
+            {main: '#ff6b35', glow: '#ffaa55'},
+            {main: '#ff3366', glow: '#ff6699'},
+            {main: '#cc33ff', glow: '#dd88ff'},
+            {main: '#3366ff', glow: '#88aaff'}
+        ]
+    };
+
+    let gameState = 'start';
+    let score = 0, wave = 1, level = 1, exp = 0, expToNext = 50;
+    let lastSpawn = 0, isPaused = false, animationId = null;
+
+    let stats = { dmg: 15, rate: 600, spd: 12, pierce: 1, count: 1, crit: 0.06 };
+
+    let bullets = [];
+    let walls = [];
+    let particles = [];
+    let player = { x: 0, y: 0, r: 30, angle: -Math.PI/2 };
+    let mouseX = 0, mouseY = 0, lastFire = 0;
+
+    const upgrades = [
+        { icon: '💥', name: 'POWER', desc: '+6 DMG', color: '#ff6b35', fn: () => stats.dmg += 6 },
+        { icon: '⚡', name: 'SPEED', desc: '+25% RATE', color: '#ffd700', fn: () => stats.rate *= 0.75 },
+        { icon: '🔩', name: 'PIERCE', desc: '+1 PIERCE', color: '#0ff', fn: () => stats.pierce += 1 },
+        { icon: '🔫', name: 'MULTI', desc: '+1 BULLET', color: '#f0f', fn: () => stats.count += 1 },
+        { icon: '🎯', name: 'CRIT', desc: '+12% CRIT', color: '#f33', fn: () => stats.crit += 0.12 }
+    ];
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        player.x = canvas.width / 2;
+        player.y = canvas.height - 80;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    canvas.addEventListener('mousemove', e => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+        let angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+        if (angle > -0.2 && angle < 0.2) angle = -0.2;
+        if (angle > 0) angle = -Math.PI + 0.2;
+        player.angle = angle;
+    });
+
+    canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+        mouseX = e.touches[0].clientX;
+        mouseY = e.touches[0].clientY;
+        let angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+        if (angle > 0) angle = -Math.PI + 0.2;
+        player.angle = angle;
+    }, { passive: false });
+
+    // 生成弧形墙体 - 在指定Y位置生成
+    function createWallAtY(centerY) {
+        const colorSet = CONFIG.colors[(wave - 1) % CONFIG.colors.length];
+        const bricks = [];
+
+        // 弧形角度范围（顶部半圆）
+        const arcAngle = Math.PI * 0.6; // 108度
+        const startAngle = -Math.PI/2 - arcAngle/2;
+        const endAngle = -Math.PI/2 + arcAngle/2;
+        const steps = 40;
+
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const angle = startAngle + t * arcAngle;
+
+            // 随机留缺口
+            if (Math.random() > 0.12) {
+                const x = player.x + Math.cos(angle) * CONFIG.arcRadius;
+                const y = centerY + Math.sin(angle) * (CONFIG.arcRadius * 0.4);
+
+                // 矩形砖块，随机高度制造锯齿
+                const w = 8 + Math.random() * 6;
+                const h = 20 + Math.random() * 25;
+
+                bricks.push({
+                    x: x - w/2,
+                    y: y - h/2,
+                    w: w,
+                    h: h,
+                    hp: 10 + wave * 2,
+                    maxHp: 10 + wave * 2,
+                    color: colorSet
+                });
+            }
+        }
+
+        return {
+            id: Date.now() + Math.random(),
+            centerY: centerY,
+            bricks: bricks,
+            color: colorSet,
+            wave: wave
+        };
+    }
+
+    // 生成新墙（从屏幕外）
+    function spawnWall() {
+        // 新墙从屏幕外上方生成（y = -100）
+        const wall = createWallAtY(-100);
+        walls.push(wall);
+        wave++;
+    }
+
+    // 初始化第一面墙（在屏幕内，y=150）
+    function initFirstWall() {
+        const wall = createWallAtY(150);
+        walls.push(wall);
+        wave = 2; // 第一面墙算wave 1，下一面是wave 2
+    }
+
+    // 更新墙体 - 平滑自然
+    function updateWalls() {
+        // 1. 所有墙体以相同速度下落
+        walls.forEach(wall => {
+            wall.centerY += CONFIG.dropSpeed;
+
+            // 更新砖块位置
+            wall.bricks.forEach(b => {
+                b.y += CONFIG.dropSpeed;
+            });
+        });
+
+        // 2. 柔和推挤：如果上方墙体追上下方墙体
+        // 按Y坐标排序（从上到下）
+        walls.sort((a, b) => a.centerY - b.centerY);
+
+        for (let i = 0; i < walls.length - 1; i++) {
+            const upper = walls[i];     // 上方的墙（老）
+            const lower = walls[i + 1]; // 下方的墙（新）
+
+            const gap = lower.centerY - upper.centerY;
+
+            // 如果间距小于目标间距，上方墙稍微加速（柔和推挤）
+            if (gap < CONFIG.minGap) {
+                const push = (CONFIG.minGap - gap) * 0.02; // 很小的推挤系数
+                upper.centerY -= push;
+                upper.bricks.forEach(b => b.y -= push);
+            }
+        }
+
+        // 移除超出屏幕的
+        walls = walls.filter(w => w.centerY < canvas.height + 200);
+    }
+
+    function checkCollisions() {
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const b = bullets[i];
+            let destroyed = false;
+
+            for (let w = walls.length - 1; w >= 0; w--) {
+                const wall = walls[w];
+
+                for (let k = wall.bricks.length - 1; k >= 0; k--) {
+                    const brick = wall.bricks[k];
+
+                    if (b.x > brick.x && b.x < brick.x + brick.w &&
+                        b.y > brick.y && b.y < brick.y + brick.h) {
+
+                        const isCrit = Math.random() < stats.crit;
+                        const dmg = stats.dmg * (isCrit ? 2 : 1);
+                        brick.hp -= dmg;
+
+                        spawnParticle(brick.x + brick.w/2, brick.y + brick.h/2, brick.color.glow);
+                        if (Math.random() < 0.4) showDamage(brick.x, brick.y, Math.floor(dmg), isCrit);
+
+                        exp += 2;
+                        score += 5;
+
+                        if (brick.hp <= 0) {
+                            wall.bricks.splice(k, 1);
+                            score += 10;
+                            for (let p = 0; p < 4; p++) spawnParticle(brick.x + brick.w/2, brick.y + brick.h/2, brick.color.main);
+                        }
+
+                        b.pierce--;
+                        if (b.pierce <= 0) {
+                            bullets.splice(i, 1);
+                            destroyed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (destroyed) break;
+            }
+
+            if (!destroyed && (b.y < -50 || b.x < -50 || b.x > canvas.width + 50)) {
+                bullets.splice(i, 1);
+            }
+        }
+    }
+
+    function spawnParticle(x, y, color) {
+        if (particles.length > 40) particles.shift();
+        particles.push({x, y, vx: (Math.random()-0.5)*4, vy: (Math.random()-0.5)*4, life: 1, color, size: 2+Math.random()*3});
+    }
+
+    function showDamage(x, y, text, isCrit) {
+        const el = document.createElement('div');
+        el.className = 'damage-text';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.color = isCrit ? '#ff00ff' : '#fff';
+        el.textContent = text;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 600);
+    }
+
+    function fire() {
+        const now = Date.now();
+        if (now - lastFire < stats.rate) return;
+        lastFire = now;
+
+        for (let i = 0; i < stats.count; i++) {
+            const spread = stats.count > 1 ? (i - (stats.count-1)/2) * 0.12 : 0;
+            const angle = player.angle + spread;
+            bullets.push({
+                x: player.x + Math.cos(angle) * (player.r + 10),
+                y: player.y + Math.sin(angle) * (player.r + 10),
+                vx: Math.cos(angle) * stats.spd,
+                vy: Math.sin(angle) * stats.spd,
+                dmg: stats.dmg,
+                pierce: stats.pierce,
+                r: 3
+            });
+        }
+    }
+
+    function update() {
+        if (gameState !== 'playing' || isPaused) return;
+
+        // 生成新墙（从屏幕外）
+        if (Date.now() - lastSpawn > CONFIG.spawnInterval) {
+            spawnWall();
+            lastSpawn = Date.now();
+        }
+
+        updateWalls();
+
+        // 检查游戏结束
+        for (let wall of walls) {
+            for (let brick of wall.bricks) {
+                if (brick.y + brick.h > player.y - player.r &&
+                    brick.x < player.x + player.r &&
+                    brick.x + brick.w > player.x - player.r) {
+                    gameOver();
+                    return;
+                }
+            }
+        }
+
+        bullets.forEach(b => { b.x += b.vx; b.y += b.vy; });
+        fire();
+        checkCollisions();
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx; p.y += p.vy; p.life -= 0.03;
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+
+        if (exp >= expToNext) {
+            exp -= expToNext;
+            level++;
+            expToNext = Math.floor(50 + level * 12);
+            showUpgrade();
+        }
+
+        updateUI();
+    }
+
+    function draw() {
+        ctx.fillStyle = 'rgba(10, 5, 16, 0.25)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 绘制弧形墙体
+        walls.forEach(wall => {
+            wall.bricks.forEach(brick => {
+                const hpPct = brick.hp / brick.maxHp;
+
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = brick.color.glow;
+                ctx.strokeStyle = brick.color.glow;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
+
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = brick.color.main;
+                ctx.globalAlpha = 0.4 + 0.6 * hpPct;
+                ctx.fillRect(brick.x + 1, brick.y + 1, brick.w - 2, brick.h - 2);
+                ctx.globalAlpha = 1;
+            });
+        });
+
+        // 绘制子弹
+        ctx.strokeStyle = '#ff00aa';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ff00aa';
+        bullets.forEach(b => {
+            ctx.beginPath();
+            ctx.moveTo(b.x - b.vx * 2, b.y - b.vy * 2);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+        });
+
+        // 绘制粒子
+        particles.forEach(p => {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = p.color;
+            ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+        });
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+
+        // 绘制玩家
+        ctx.save();
+        ctx.translate(player.x, player.y);
+        ctx.rotate(player.angle + Math.PI/2);
+
+        ctx.beginPath();
+        ctx.arc(0, 0, player.r, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#00ffff';
+        ctx.stroke();
+
+        const expPct = exp / expToNext;
+        if (expPct > 0) {
+            ctx.beginPath();
+            ctx.arc(0, 0, player.r - 5, 0, Math.PI * 2 * expPct);
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#ff00ff';
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = '#ff00aa';
+        ctx.fillRect(-4, -player.r - 12, 8, 16);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(0, -player.r - 14, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    function showUpgrade() {
+        isPaused = true;
+        const modal = document.getElementById('upgradeModal');
+        const list = document.getElementById('upgradeList');
+        list.innerHTML = '';
+
+        const opts = [...upgrades].sort(() => 0.5 - Math.random()).slice(0, 3);
+        opts.forEach(u => {
+            const card = document.createElement('div');
+            card.className = 'upgrade-card';
+            card.style.borderColor = u.color;
+            card.innerHTML = `
+                    <div class="upgrade-icon">${u.icon}</div>
+                    <div class="upgrade-name" style="color: ${u.color}">${u.name}</div>
+                    <div class="upgrade-desc">${u.desc}</div>
+                `;
+            card.onclick = () => { u.fn(); modal.classList.remove('active'); isPaused = false; updateUI(); };
+            list.appendChild(card);
+        });
+
+        modal.classList.add('active');
+    }
+
+    function updateUI() {
+        document.getElementById('score').textContent = score;
+        document.getElementById('wave').textContent = wave - 1;
+        document.getElementById('level').textContent = level;
+    }
+
+    function gameOver() {
+        gameState = 'gameover';
+        document.getElementById('finalScore').textContent = score;
+        document.getElementById('gameOverScreen').classList.add('active');
+        if (animationId) cancelAnimationFrame(animationId);
+    }
+
+    function startGame() {
+        document.getElementById('startScreen').classList.remove('active');
+        gameState = 'playing';
+        resetGame();
+        lastSpawn = Date.now();
+        gameLoop();
+    }
+
+    function restartGame() {
+        document.getElementById('gameOverScreen').classList.remove('active');
+        gameState = 'playing';
+        resetGame();
+        lastSpawn = Date.now();
+        gameLoop();
+    }
+
+    function resetGame() {
+        score = 0; wave = 1; level = 1; exp = 0; expToNext = 50;
+        walls = []; bullets = []; particles = [];
+        stats = { dmg: 15, rate: 600, spd: 12, pierce: 1, count: 1, crit: 0.06 };
+        initFirstWall(); // 生成初始墙
+        updateUI();
+    }
+
+    function gameLoop() {
+        if (gameState !== 'playing') return;
+        update();
+        draw();
+        animationId = requestAnimationFrame(gameLoop);
+    }
+
+    resize();
+    draw();
+</script>
+</body>
+</html>
